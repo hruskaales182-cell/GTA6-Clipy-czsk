@@ -161,23 +161,39 @@ def render(c, d, p, words):
     k = srcw / s["ref"][0]
     gx, gy, gw, gh = [round(v * k) for v in s["game"]]
     gH = round(W * gh / gw / 2) * 2
-    camH = 0
+    # layout: hook box on top, the streamer's CAM full width under it, the WHOLE game frame full width under the cam
+    # (never cropped, only scaled); without a cam the game sits in the middle. Cam = Claude's box from a frame, or the
+    # source's template when no API key is set.
+    cam = None
     if p.get("cam_present") and p.get("cam_w", 0) > 20 and p.get("cam_h", 0) > 20:
         fx = srcw / 960
-        cx, cy, cw, ch = [max(0, round(p[k2] * fx)) for k2 in ("cam_x", "cam_y", "cam_w", "cam_h")]
+        cam = [max(0, round(p[k2] * fx)) for k2 in ("cam_x", "cam_y", "cam_w", "cam_h")]
+    elif not os.environ.get("ANTHROPIC_API_KEY") and s.get("cam"):
+        cam = [round(v * k) for v in s["cam"]]
+    camH = 0
+    if cam:
+        cx, cy, cw, ch = cam
         cw, ch = min(cw, srcw - cx), min(ch, srch - cy)
-        camW = 820; camH = round(camW * ch / cw / 2) * 2
-    block = gH + (camH + 30 if camH else 0)
-    gy0 = max(300, (H - block) // 2 + 40)           # game + cam centred, below the hook box
+        camW = W
+        camH = round(camW * ch / cw / 2) * 2
+        if camH > 760: camH = 760; camW = round(760 * cw / ch / 2) * 2     # very tall cams: keep the game on screen
+    top = 280                                        # below the hook box
+    if camH:
+        cy0 = top; gy0 = top + camH + 14
+        if gy0 + gH > H - 120: gy0 = H - 120 - gH; cy0 = gy0 - 14 - camH
+    else:
+        gy0 = (H - gH) // 2
     f = ["[0:v]split=3[a][b][c]",
          f"[a]crop={gw}:{gh}:{gx}:{gy},scale=-2:{H},crop={W}:{H},boxblur=28:3,eq=brightness=-0.18[bg]",
          f"[b]crop={gw}:{gh}:{gx}:{gy},scale={W}:{gH}:flags=lanczos[g]", f"[bg][g]overlay=0:{gy0}[v1]"]
     if camH:
-        f += [f"[c]crop={cw}:{ch}:{cx}:{cy},scale={camW}:{camH}:flags=lanczos,pad={camW + 12}:{camH + 12}:6:6:color=white[cam]",
-              f"[v1][cam]overlay={(W - camW - 12) // 2}:{gy0 + gH + 24}[v2]"]
+        f += [f"[c]crop={cw}:{ch}:{cx}:{cy},scale={camW}:{camH}:flags=lanczos[cam]",
+              f"[v1][cam]overlay={(W - camW) // 2}:{cy0}[v2]"]
+        capY = cy0 + camH - 70                       # captions on the lower edge of the cam, the game stays clean
     else:
         f += ["[c]nullsink", "[v1]null[v2]"]
-    (d / "subs.ass").write_text(subs(p["hook"], words, p["t0"], p["t1"], gy0 + gH - 60), encoding="utf-8")
+        capY = gy0 + gH + 110
+    (d / "subs.ass").write_text(subs(p["hook"], words, p["t0"], p["t1"], capY), encoding="utf-8")
     f.append("[v2]setsar=1,ass=subs.ass[v]")
     out = OUT / f"{cid_of(c)}.mp4"; OUT.mkdir(exist_ok=True)
     sh("ffmpeg", "-y", "-loglevel", "error", "-ss", f"{p['t0']:.2f}", "-t", f"{p['t1'] - p['t0']:.2f}", "-i", "src.mp4", "-filter_complex", ";".join(f),
