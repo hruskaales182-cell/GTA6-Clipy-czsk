@@ -45,11 +45,12 @@ def kick_clips(slug):
 def candidates(sources, seen):
     picks = []
     for s in sources:
-        lst = twitch_clips(s["slug"]) if s["platform"] == "twitch" else kick_clips(s["slug"])
-        lst = [c for c in lst if 8 <= c["dur"] <= 62 and c["url"] not in seen]
+        raw = twitch_clips(s["slug"]) if s["platform"] == "twitch" else kick_clips(s["slug"])
+        game = [c for c in raw if "category" not in c or re.search(r"(?i)grand theft|gta", c["category"] or "")]  # Kick knows the game
+        lst = [c for c in game if 8 <= c["dur"] <= 62 and c["url"] not in seen]
         lst.sort(key=lambda c: -c["views"])
         for c in lst[:PER_SOURCE]: picks.append({**c, "src": s})
-        print(f"{s['name']}: {len(lst)} candidates")
+        print(f"{s['name']}: {len(raw)} clips, {len(game)} GTA, {len(lst)} candidates" + (f" (durations: {[c['dur'] for c in raw[:5]]})" if raw and not lst else ""))
     return picks
 
 
@@ -77,7 +78,8 @@ SCHEMA = {"type": "object", "additionalProperties": False,
                          "cam_present": {"type": "boolean"}, "cam_x": {"type": "number"}, "cam_y": {"type": "number"},
                          "cam_w": {"type": "number"}, "cam_h": {"type": "number"}}}
 SYSTEM = """You edit stream clips into YouTube Shorts for a clip channel. For each clip you get the streamer, the channel
-language, the clip title and the transcript with timestamps. Decide whether it is worth posting (a funny, shocking or
+language, the clip title and the transcript with timestamps. The channels post only GTA 6 content: skip clips from other games or without
+GTA 6 on screen. Decide whether it is worth posting (a funny, shocking or
 hype reaction that works without context; skip clips where only game cutscene dialogue plays, nothing happens, or the
 content is sexual, hateful or accuses a real person of a crime). Pick the best continuous window (t0..t1, 8-40 s,
 start right before the moment, end right after the payoff). Write in the channel language: hook = the on-screen text
@@ -275,6 +277,11 @@ class Tee:
 
 
 def selfcheck():
+    # a subscription token pasted under the API key's name: use it for Claude Code (and keep it away from the SDK)
+    k = os.environ.get("ANTHROPIC_API_KEY", "")
+    if k.startswith("sk-ant-oat") and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = k; os.environ.pop("ANTHROPIC_API_KEY"); print("AI: using the subscription token found in ANTHROPIC_API_KEY")
+    elif os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") and k: os.environ.pop("ANTHROPIC_API_KEY")  # Claude Code would prefer the API key
     if not (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("USE_CLAUDE_CODE")): print("AI: none (no CLAUDE_CODE_OAUTH_TOKEN)"); return
     try:
         r = subprocess.run(["claude", "-p", "Reply with the single word OK.", "--output-format", "json"], capture_output=True, text=True,
