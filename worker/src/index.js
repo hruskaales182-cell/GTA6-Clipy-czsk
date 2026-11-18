@@ -95,7 +95,24 @@ export default {
       if (!isPipeline(req, env)) return J({ error: "unauthorized" }, 401);
       const q = await getQueue(env);
       return J({ seen: q.map((c) => c.source).filter(Boolean), notes: (await env.KV.get("notes", "json")) || [],
-        approved: q.filter((c) => c.status === "approved") });
+        approved: q.filter((c) => c.status === "approved"), log: (await env.KV.get("lastlog")) || "",
+        queue: q.map((c) => ({ id: c.id, status: c.status, streamer: c.streamer, hook: c.hook, source: c.source })) });
+    }
+    // the daily run's log (last run only), so problems can be read without GitHub access
+    if (p === "/api/pipeline/log" && req.method === "POST") {
+      if (!isPipeline(req, env)) return J({ error: "unauthorized" }, 401);
+      await env.KV.put("lastlog", (await req.text()).slice(-60000));
+      return J({ ok: true });
+    }
+    // bulk status change from the pipeline / maintenance: { ids: [...], status }
+    if (p === "/api/pipeline/status" && req.method === "POST") {
+      if (!isPipeline(req, env)) return J({ error: "unauthorized" }, 401);
+      const { ids = [], status } = await req.json().catch(() => ({}));
+      if (!["new", "approved", "rejected", "uploaded"].includes(status)) return J({ error: "bad status" }, 400);
+      const q = await getQueue(env); let n = 0;
+      for (const c of q) if (ids.includes(c.id)) { c.status = status; c.updated = Date.now(); n++; }
+      await putQueue(env, q);
+      return J({ ok: true, changed: n });
     }
 
     // ---- app endpoints (session token) ----

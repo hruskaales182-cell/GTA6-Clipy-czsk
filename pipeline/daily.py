@@ -109,7 +109,10 @@ def plan_cc(user, d, dur):
                             "--allowedTools", "Read", "--max-turns", "4"], cwd=d, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
         out = json.loads(r.stdout or "{}")
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
-        print(f"claude code failed: {e}"); return None
+        print(f"claude code failed: {e}")
+        try: print("  rc:", r.returncode, "stdout:", (r.stdout or "")[:400].replace(chr(10), " | "), "stderr:", (r.stderr or "")[:400].replace(chr(10), " | "))
+        except Exception: pass
+        return None
     if out.get("is_error"): print("claude code error:", str(out.get("result"))[:200]); return None
     p = out.get("structured_output")
     if not isinstance(p, dict):
@@ -264,7 +267,37 @@ def push(c, p, out):
             "desc": desc, "tags": tags, "views": c["views"], "source": c["url"], "score": p.get("score", 0), "video": vk, "thumb": tk, "dur": round(p["t1"] - p["t0"], 1)}
 
 
+class Tee:
+    """everything printed also goes to the run log that is sent to Klipárna at the end"""
+    def __init__(self, s): self.s, self.buf = s, []
+    def write(self, x): self.s.write(x); self.buf.append(x)
+    def flush(self): self.s.flush()
+
+
+def selfcheck():
+    if not (os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("USE_CLAUDE_CODE")): print("AI: none (no CLAUDE_CODE_OAUTH_TOKEN)"); return
+    try:
+        r = subprocess.run(["claude", "-p", "Reply with the single word OK.", "--output-format", "json"], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=180)
+        print(f"AI self-check rc={r.returncode} out={(r.stdout or '')[:300]!r} err={(r.stderr or '')[:300]!r}")
+    except Exception as e:
+        print(f"AI self-check failed: {e}")
+
+
 def main():
+    tee = Tee(sys.stdout); sys.stdout = tee
+    try: run()
+    except Exception as e:
+        import traceback; traceback.print_exc(file=sys.stdout); raise
+    finally:
+        sys.stdout = tee.s
+        if BASE:
+            try: api("POST", "/api/pipeline/log", "".join(tee.buf).encode("utf-8"), "text/plain; charset=utf-8")
+            except Exception as e: print("log upload failed:", e)
+
+
+def run():
+    selfcheck()
     sources = json.load(open(HERE / "sources.json", encoding="utf-8"))
     if os.environ.get("ONLY"): sources = [s for s in sources if s["slug"] in os.environ["ONLY"].split(",")]
     state = api("GET", "/api/pipeline/state") if BASE else {"seen": [], "notes": []}
@@ -282,9 +315,14 @@ def main():
             if p["keep"]: done.append((p["score"], c, p, words, d))
         except Exception as e:
             print(f"{cid}: skipped ({e})")
+    # half of the day's clips per channel language (the Czech channel must not lose to the bigger EN streamers)
     done.sort(key=lambda x: -x[0])
+    langs = sorted({x[1]["src"]["lang"] for x in done})
+    pick = []
+    for lg in langs: pick += [x for x in done if x[1]["src"]["lang"] == lg][: max(1, MAX_CLIPS // max(1, len(langs)))]
+    pick += [x for x in done if x not in pick][: max(0, MAX_CLIPS - len(pick))]
     recs = []
-    for score, c, p, words, d in done[:MAX_CLIPS]:
+    for score, c, p, words, d in pick:
         try:
             out = render(c, d, p, words)
             if BASE: recs.append(push(c, p, out))
