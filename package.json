@@ -1,0 +1,9 @@
+{
+  "name": "clipapp",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev --config worker/wrangler.toml --local --port 8787",
+    "deploy": "wrangler deploy --config worker/wrangler.toml"
+  },
+  "devDependencies": { "wrangler": "4.164.0" }
+}

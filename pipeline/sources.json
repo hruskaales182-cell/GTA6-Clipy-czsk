@@ -1,0 +1,8 @@
+[
+  {"name": "Herdyn", "platform": "twitch", "slug": "herdyn", "lang": "cs", "ref": [1920, 1080], "game": [0, 0, 1920, 900], "cam": null},
+  {"name": "Kai Cenat", "platform": "twitch", "slug": "kaicenat", "lang": "en", "ref": [1920, 1080], "game": [0, 0, 1920, 960], "cam": [0, 345, 395, 222]},
+  {"name": "IShowSpeed", "platform": "twitch", "slug": "ishowspeed", "lang": "en", "ref": [1920, 1080], "game": [0, 0, 1920, 900], "cam": [0, 460, 390, 232]},
+  {"name": "ohnePixel", "platform": "twitch", "slug": "ohnepixel", "lang": "en", "ref": [2560, 1440], "game": [0, 0, 2560, 1440], "cam": [330, 960, 480, 338]},
+  {"name": "Haiset", "platform": "kick", "slug": "haiset", "lang": "cs", "ref": [1920, 1080], "game": [0, 0, 1920, 1080], "cam": null},
+  {"name": "Fattypillow", "platform": "kick", "slug": "fattypillow", "lang": "cs", "ref": [1920, 1080], "game": [0, 0, 1920, 1080], "cam": null}
+]
