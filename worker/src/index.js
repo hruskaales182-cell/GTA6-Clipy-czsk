@@ -53,7 +53,7 @@ export default {
       if (!obj) return new Response("not found", { status: 404 });
       const h = new Headers();
       obj.writeHttpMetadata(h);
-      h.set("etag", obj.httpEtag); h.set("accept-ranges", "bytes"); h.set("cache-control", "private, max-age=86400");
+      h.set("etag", obj.httpEtag); h.set("accept-ranges", "bytes"); h.set("cache-control", "private, max-age=600");
       if (url.searchParams.get("dl")) h.set("content-disposition", `attachment; filename="${key.split("/").pop()}"`);
       if (range && obj.range) {
         const { offset = 0, length = obj.size - offset } = obj.range;

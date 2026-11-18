@@ -17,7 +17,7 @@
     if (!r.ok) throw new Error(data.error || `Chyba ${r.status}`);
     return data;
   };
-  const media = (key, dl) => key ? `/media/${encodeURIComponent(key)}?t=${encodeURIComponent(token)}${dl ? "&dl=1" : ""}` : "";
+  const media = (key, dl) => key ? `/media/${encodeURIComponent(key)}?t=${encodeURIComponent(token)}&r=2${dl ? "&dl=1" : ""}` : "";
   let toastT;
   const toast = (msg) => { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200); };
   const buzz = () => { try { navigator.vibrate?.(12); } catch { /* iOS has none */ } };
