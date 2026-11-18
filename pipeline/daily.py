@@ -70,9 +70,10 @@ def transcribe(f, lang):
 
 # ---------------- 3. Claude picks + writes ----------------
 SCHEMA = {"type": "object", "additionalProperties": False,
-          "required": ["keep", "score", "t0", "t1", "hook", "title", "desc", "cam_present", "cam_x", "cam_y", "cam_w", "cam_h"],
+          "required": ["keep", "score", "t0", "t1", "hook", "title", "desc", "scene", "cam_present", "cam_x", "cam_y", "cam_w", "cam_h"],
           "properties": {"keep": {"type": "boolean"}, "score": {"type": "integer"}, "t0": {"type": "number"}, "t1": {"type": "number"},
                          "hook": {"type": "string"}, "title": {"type": "string"}, "desc": {"type": "string"},
+                         "scene": {"type": "string", "enum": ["gameplay", "camera_only", "menu"]},
                          "cam_present": {"type": "boolean"}, "cam_x": {"type": "number"}, "cam_y": {"type": "number"},
                          "cam_w": {"type": "number"}, "cam_h": {"type": "number"}}}
 SYSTEM = """You edit stream clips into YouTube Shorts for a clip channel. For each clip you get the streamer, the channel
@@ -83,10 +84,12 @@ start right before the moment, end right after the payoff). Write in the channel
 box at the top (max 6 words, upper case, one emoji at the end), title = YouTube title (max 70 chars, one or two
 emojis), desc = one or two short lines plus 3-5 hashtags including #shorts. score = 0-100 how likely it goes viral.
 Follow the user's wishes when given.
-You also get one frame of the clip (960 x 540 px). If the frame shows GAMEPLAY with the streamer's webcam as a small
-overlay box, set cam_present = true and give that webcam box (cam_x, cam_y, cam_w, cam_h in the frame's pixels, tight
-around the webcam picture, no chat or alerts). If the whole frame is the camera (IRL, just chatting) or there is no
-webcam, set cam_present = false and the four numbers to 0."""
+You also get one frame of the clip (960 x 540 px). scene = "gameplay" (the game fills the frame), "menu" (game menus,
+loading or settings screens) or "camera_only" (the whole frame is the streamer's camera: IRL, just chatting, a car).
+In gameplay and menu frames these streamers ALWAYS have a webcam overlay box somewhere, often small, dark or in a
+corner: look carefully (you get the usual position as a hint) and give that box in cam_x, cam_y, cam_w, cam_h (the
+frame's pixels, tight around the webcam picture only, no chat, alerts or game HUD) with cam_present = true. Only when
+no webcam is visible at all, or scene = camera_only, set cam_present = false and the four numbers to 0."""
 
 
 def frame_b64(d, dur):
@@ -124,7 +127,11 @@ def plan(c, words, dur, notes, d):
                 "title": f"{s['name']} v GTA 6 😭" if s["lang"] == "cs" else f"{s['name']} in GTA 6 😭", "desc": "#gta6 #shorts", "cam_present": False}
     tr = " ".join(f"[{w['s']:.1f}]{w['w']}" for w in words) or "(no speech)"
     wish = "\n".join(f"- {n['text']}" for n in notes if not n.get("done"))[:2000]
-    user = (f"Streamer: {s['name']}\nChannel language: {'Czech' if s['lang'] == 'cs' else 'English'}\nClip title: {c['title']}\nViews: {c['views']}\n"
+    hint = ""
+    if s.get("cam"):
+        q = 960 / s["ref"][0]
+        hint = "Usual webcam box of this streamer in the 960x540 frame: x={:.0f} y={:.0f} w={:.0f} h={:.0f}\n".format(*[v * q for v in s["cam"]])
+    user = hint + (f"Streamer: {s['name']}\nChannel language: {'Czech' if s['lang'] == 'cs' else 'English'}\nClip title: {c['title']}\nViews: {c['views']}\n"
             f"Clip length: {dur:.1f} s\nTranscript:\n{tr}\n" + (f"\nUser's wishes:\n{wish}\n" if wish else ""))
     if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("USE_CLAUDE_CODE"):
         p = plan_cc(user, d, dur)
@@ -191,11 +198,13 @@ def render(c, d, p, words):
     # layout: hook box on top, the streamer's CAM full width under it, the WHOLE game frame full width under the cam
     # (never cropped, only scaled); without a cam the game sits in the middle. Cam = Claude's box from a frame, or the
     # source's template when no API key is set.
+    if p.get("scene") == "camera_only":
+        return render_irl(c, d, p, words, srcw, srch)
     cam = None
     if p.get("cam_present") and p.get("cam_w", 0) > 20 and p.get("cam_h", 0) > 20:
         fx = srcw / 960
         cam = [max(0, round(p[k2] * fx)) for k2 in ("cam_x", "cam_y", "cam_w", "cam_h")]
-    elif not any(os.environ.get(v) for v in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "USE_CLAUDE_CODE")) and s.get("cam"):
+    elif s.get("cam"):                               # no box from Claude: the streamer's usual webcam position
         cam = [round(v * k) for v in s["cam"]]
     camH = 0
     if cam:
@@ -204,7 +213,7 @@ def render(c, d, p, words):
         camW = W
         camH = round(camW * ch / cw / 2) * 2
         if camH > 760: camH = 760; camW = round(760 * cw / ch / 2) * 2     # very tall cams: keep the game on screen
-    top = 280                                        # below the hook box
+    top = max(280, (H - gH - camH - 14) // 2 - 60)   # below the hook box, the block roughly centred
     if camH:
         cy0 = top; gy0 = top + camH + 14
         if gy0 + gH > H - 120: gy0 = H - 120 - gH; cy0 = gy0 - 14 - camH
@@ -222,6 +231,20 @@ def render(c, d, p, words):
         capY = gy0 + gH + 110
     (d / "subs.ass").write_text(subs(p["hook"], words, p["t0"], p["t1"], capY), encoding="utf-8")
     f.append("[v2]setsar=1,ass=subs.ass[v]")
+    out = OUT / f"{cid_of(c)}.mp4"; OUT.mkdir(exist_ok=True)
+    sh("ffmpeg", "-y", "-loglevel", "error", "-ss", f"{p['t0']:.2f}", "-t", f"{p['t1'] - p['t0']:.2f}", "-i", "src.mp4", "-filter_complex", ";".join(f),
+       "-map", "[v]", "-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+       "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", str(out), cwd=d)
+    return out
+
+
+def render_irl(c, d, p, words, srcw, srch):
+    """the whole frame is the camera (IRL / in the car): a 4:5 crop around the centre, burned-in subtitles cut off"""
+    h = round(srch * 0.88); w = round(h * 0.8 / 2) * 2; x = (srcw - w) // 2
+    fH = round(W / 0.8 / 2) * 2; y0 = 300
+    f = ["[0:v]split=2[a][b]", f"[a]crop={w}:{h}:{x}:0,scale=-2:{H},crop={W}:{H},boxblur=28:3,eq=brightness=-0.18[bg]",
+         f"[b]crop={w}:{h}:{x}:0,scale={W}:{fH}:flags=lanczos[g]", f"[bg][g]overlay=0:{y0},setsar=1,ass=subs.ass[v]"]
+    (d / "subs.ass").write_text(subs(p["hook"], words, p["t0"], p["t1"], y0 + fH - 110), encoding="utf-8")
     out = OUT / f"{cid_of(c)}.mp4"; OUT.mkdir(exist_ok=True)
     sh("ffmpeg", "-y", "-loglevel", "error", "-ss", f"{p['t0']:.2f}", "-t", f"{p['t1'] - p['t0']:.2f}", "-i", "src.mp4", "-filter_complex", ";".join(f),
        "-map", "[v]", "-map", "0:a:0", "-af", "loudnorm=I=-14:TP=-1.5:LRA=11", "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
