@@ -96,16 +96,43 @@ def frame_b64(d, dur):
     return base64.standard_b64encode(f.read_bytes()).decode()
 
 
+def plan_cc(user, d, dur):
+    """the same decision through Claude Code on the user's subscription (CLAUDE_CODE_OAUTH_TOKEN): print mode, the frame
+    as a file it reads, structured output by --json-schema"""
+    frame_b64(d, dur)  # writes d/frame.jpg
+    prompt = (SYSTEM + "\n\nFirst read the frame image frame.jpg in the current folder, then decide. Answer only with the JSON.\n\n" + user)
+    try:
+        r = subprocess.run(["claude", "-p", prompt, "--output-format", "json", "--json-schema", json.dumps(SCHEMA),
+                            "--allowedTools", "Read", "--max-turns", "4"], cwd=d, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+        out = json.loads(r.stdout or "{}")
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
+        print(f"claude code failed: {e}"); return None
+    if out.get("is_error"): print("claude code error:", str(out.get("result"))[:200]); return None
+    p = out.get("structured_output")
+    if not isinstance(p, dict):
+        m = re.search(r"\{.*\}", str(out.get("result", "")), re.S)
+        try: p = json.loads(m.group(0)) if m else None
+        except json.JSONDecodeError: p = None
+    if not isinstance(p, dict) or not all(k in p for k in ("keep", "t0", "t1", "hook", "title", "desc")): return None
+    p.setdefault("score", 50); p.setdefault("cam_present", False)
+    return p
+
+
 def plan(c, words, dur, notes, d):
     s = c["src"]
     fallback = {"keep": True, "score": min(99, c["views"] // 5), "t0": 0.0, "t1": dur, "hook": f"{s['name'].upper()} V GTA 6 😭" if s["lang"] == "cs" else f"{s['name'].upper()} IN GTA 6 😭",
                 "title": f"{s['name']} v GTA 6 😭" if s["lang"] == "cs" else f"{s['name']} in GTA 6 😭", "desc": "#gta6 #shorts", "cam_present": False}
-    if not os.environ.get("ANTHROPIC_API_KEY"): return fallback
-    import anthropic
     tr = " ".join(f"[{w['s']:.1f}]{w['w']}" for w in words) or "(no speech)"
     wish = "\n".join(f"- {n['text']}" for n in notes if not n.get("done"))[:2000]
     user = (f"Streamer: {s['name']}\nChannel language: {'Czech' if s['lang'] == 'cs' else 'English'}\nClip title: {c['title']}\nViews: {c['views']}\n"
             f"Clip length: {dur:.1f} s\nTranscript:\n{tr}\n" + (f"\nUser's wishes:\n{wish}\n" if wish else ""))
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") or os.environ.get("USE_CLAUDE_CODE"):
+        p = plan_cc(user, d, dur)
+        if p is None: return fallback
+        p["t0"] = max(0.0, min(float(p["t0"]), dur - 3)); p["t1"] = max(p["t0"] + 3, min(float(p["t1"]), dur))
+        return p
+    if not os.environ.get("ANTHROPIC_API_KEY"): return fallback
+    import anthropic
     client = anthropic.Anthropic()
     try:
         r = client.beta.messages.create(model="claude-opus-5-5", max_tokens=4000, system=SYSTEM, messages=[{"role": "user", "content": [
@@ -168,7 +195,7 @@ def render(c, d, p, words):
     if p.get("cam_present") and p.get("cam_w", 0) > 20 and p.get("cam_h", 0) > 20:
         fx = srcw / 960
         cam = [max(0, round(p[k2] * fx)) for k2 in ("cam_x", "cam_y", "cam_w", "cam_h")]
-    elif not os.environ.get("ANTHROPIC_API_KEY") and s.get("cam"):
+    elif not any(os.environ.get(v) for v in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "USE_CLAUDE_CODE")) and s.get("cam"):
         cam = [round(v * k) for v in s["cam"]]
     camH = 0
     if cam:

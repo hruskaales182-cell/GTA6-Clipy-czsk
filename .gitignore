@@ -6,3 +6,4 @@ pipeline/out/
 pipeline/seed.json
 worker/.dev.vars
 __pycache__/
+GITHUB_SECRETS.txt

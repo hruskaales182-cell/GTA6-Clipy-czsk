@@ -11,10 +11,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - name: ffmpeg + fonts
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: ffmpeg + fonts + Claude Code
         run: |
           echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | sudo debconf-set-selections
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg ttf-mscorefonts-installer
+          npm install -g @anthropic-ai/claude-code
       - name: python deps
         run: pip install -q yt-dlp faster-whisper anthropic numpy
       - uses: actions/cache@v4
@@ -23,5 +26,6 @@ jobs:
         env:
           KLIPARNA_URL: ${{ secrets.KLIPARNA_URL }}
           PIPELINE_TOKEN: ${{ secrets.PIPELINE_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python pipeline/daily.py
