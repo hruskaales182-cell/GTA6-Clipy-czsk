@@ -7,7 +7,7 @@ BASE, TOKEN = sys.argv[1].rstrip("/"), os.environ["PIPELINE_TOKEN"]
 
 
 def req(method, path, data=None, ctype="application/json"):
-    r = urllib.request.Request(BASE + path, data=data, method=method, headers={"authorization": f"Bearer {TOKEN}", "content-type": ctype})
+    r = urllib.request.Request(BASE + path, data=data, method=method, headers={"authorization": f"Bearer {TOKEN}", "content-type": ctype, "user-agent": "KlipanaPipeline/1.0 (+github actions)"})
     with urllib.request.urlopen(r, timeout=300) as resp: return json.loads(resp.read() or b"{}")
 
 
